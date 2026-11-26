@@ -39,3 +39,8 @@ rides) from calendar, weather, and lagged-demand features.
   cannot extrapolate to 2012. That is the headline result, not an error.
 - 2012-10-29 (Hurricane Sandy, 22 rides) is in the test set. Expect it in
   any residual plot.
+
+## Additional project rules
+- cnt_std_7 uses the preceding seven calendar days only.
+- All raw columns must be explicitly classified in src/config.py.
+- Use /seed-fault to introduce, document, and repair verification faults.
