@@ -185,66 +185,101 @@ findings with evidence. Do not modify any files.
 The subagent completed its audit in 35 minutes and
 53 seconds.
 
-**Auditor results (Claude Code summary of the
-completed subagent audit):**
+**Auditor output (verbatim from the saved subagent transcript):**
 
-```
-Audit Results
+````text
+I have gathered all the necessary files to perform the audit. Let me now analyze both commits against the five checks defined in the leakage-auditor.md.
 
-Commit 16ad390 - "Exercise 4: TARGET_TRANSFORM=ratio option in train.py"
+## Audit of Commit 16ad390 (Exercise 4: TARGET_TRANSFORM=ratio option)
 
-Verdict: CLEAN — All five checks passed.
+This commit adds a `TARGET_TRANSFORM` feature to `src/train.py`. Here are my findings:
 
-- Check 1 (Target leakage): PASS — cnt / cnt_roll_7 uses
-  only days d-1..d-7, which are known at prediction time
-- Check 2 (Temporal ordering): PASS — .shift(1) before
-  aggregation; temporal split by date; StandardScaler
-  fits only on train
-- Check 3 (Calendar gaps): PASS — inherits
-  reindex_to_calendar() from features.py
-- Check 4 (Silent row loss): PASS — ratio transform is
-  pure arithmetic, no dropna/merge/map
-- Check 5 (Unreported baseline): PASS — all models report
-  both valid and test metrics; mean and persistence
-  baselines included
+### Check 1: Target Leakage
+**Verdict: PASS**
 
-Commit 5b84a68 - "Exercise 4: ratio-target decision on validation..."
+The transform computes `cnt / cnt_roll_7` where:
+- `cnt_roll_7 = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()` (line 76 in features.py)
 
-Verdict: CLEAN — Documentation-only commit with no code changes.
+Since `cnt_roll_7` is shifted by 1 and then rolled, it only contains counts from d-1 to d-7. The ratio uses past data exclusively—neither component is the target at time t. This is a **known-at-prediction-time transform**, not leakage.
 
-- Check 5 (Unreported baseline): PASS — explicitly reports
-  both baselines alongside all model scores in the
-  decision table
+### Check 2: Temporal Ordering
+**Verdict: PASS**
 
-Key Evidence
-
-From src/train.py line 76:
-
+```python
 out["cnt_roll_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()
+```
+The `.shift(1)` is applied before aggregation, as required. The temporal split in `fit_and_score()` uses `temporal_split(df)` which correctly splits by date (train=2011, valid=H1 2012, test=H2 2012). StandardScaler only fits on train rows (`model.fit(train[cols], y_fit)`), so validation/test are never seen during fitting.
 
-The rolling mean is built on shifted target values,
-ensuring the denominator never includes time t's count.
-This is a valid known-at-prediction-time transform.
+### Check 3: Calendar Gaps
+**Verdict: PASS (indirectly)**
 
-Conclusion
+This commit doesn't modify `src/features.py`, but it calls existing code that includes `reindex_to_calendar()` which fills missing calendar days. The lag features are built on the reindexed data with proper `.shift(1)` before aggregation, so no gap issues arise.
 
-No findings that change numbers or invalidate conclusions.
-Both commits are methodologically sound per the five
-checks defined in leakage-auditor.md.
+### Check 4: Silent Row Loss
+**Verdict: PASS**
+
+The commit adds only computation logic:
+```python
+y_fit = train[TARGET] / train[RATIO_SCALE] if ratio else train[TARGET]
+```
+No `.dropna()`, `.merge()`, or `.map()` that could silently drop rows. The ratio transform is a pure arithmetic operation with no NaN introduction (assuming cnt and cnt_roll_7 both exist).
+
+### Check 5: Unreported Baseline
+**Verdict: PASS**
+
+All four models report BOTH validation AND test metrics:
+```python
+results[name] = {
+    split: {"r2": ..., "mae": ...}
+    for split, part in [("valid", valid), ("test", test)]
+}
+```
+Both the mean baseline (`DummyRegressor`) and persistence baseline (`PersistenceBaseline("cnt_lag_1")`) are reported alongside ridge and hgb scores.
+
+---
+
+## Audit of Commit 5b84a68 (Exercise 4: ratio-target decision on validation, one test-set check, report section)
+
+This commit only modifies documentation files:
+- `REPORT.md` - adds Exercise 4/5 sections with metrics tables
+- `docs/DECISIONS.md` - adds decision log entries
+
+### Checks on Documentation Commits:
+
+**Check 1-4:** N/A (no code changes introducing new features)
+
+**Check 5: Unreported Baseline**
+**Verdict: PASS**
+
+The REPORT.md explicitly reports both baselines for all models:
+```
+| Model | Valid R^2, raw target | Valid R^2, ratio target | Valid MAE, raw | Valid MAE, ratio |
+| baseline_mean | -0.932 | -0.932 | 2002.2 | 2002.2 |
+| baseline_persistence | 0.451 | 0.451 | 900.6 | 900.6 |
 ```
 
-**My verdict (Audrey):** I agree with the auditor that
-the ratio transformation does not introduce target
-leakage because its denominator uses only demand from
-previous days. The current day's count is used as the
-training target, not as a prediction-time input.
-Temporal ordering and both baselines are preserved.
-The auditor incorrectly references `src/train.py` for
-the rolling mean calculation, which is actually in
-`src/features.py`. Additionally, the transformation
-code computes and saves test metrics during the
-validation experiment, even though it prints only
-validation results. This does not demonstrate test-set
-tuning, but stricter separation would improve the
-experimental design. I found no evidence that the
-reported numerical results need to change.
+The decision rationale acknowledges the trade-offs: "Picking a target per model is an extra degree of freedom." and "the committed pipeline stays untransformed."
+
+---
+
+## Final Verdicts
+
+**Commit 16ad390:** All five checks pass. The `TARGET_TRANSFORM=ratio` feature correctly uses only past-available data (d-1 to d-7 for the rolling window), maintains temporal split integrity, handles calendar gaps via existing reindexing code, introduces no silent row loss, and reports all baselines alongside model scores.
+
+**Commit 5b84a68:** All checks pass by inheritance—it documents the already-implemented solution without modifying any feature or training logic. The documentation accurately reflects what was committed to the codebase.
+
+---
+````
+
+**My verdict (Audrey):** I agree with the auditor that the
+ratio transformation does not introduce target leakage because
+its denominator uses only demand from previous days. One
+clarification is that the numerator is the current day's count,
+but it is used as the training target rather than a prediction-time
+input. Temporal ordering and both baselines are preserved.
+Additionally, the transformation code computes and saves test
+metrics during the validation experiment, even though it prints
+only validation results. This does not demonstrate test-set
+tuning, but stricter separation would improve the experimental
+design. I found no evidence that the reported numerical results
+need to change.
