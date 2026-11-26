@@ -4,6 +4,7 @@ test_no_forbidden_features is the single most valuable test in this repo:
 casual + registered == cnt exactly, so any model handed those columns
 scores R^2 = 1.0 and looks brilliant while having learned nothing.
 """
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -55,6 +56,25 @@ def test_rolling_mean_excludes_today(feats):
     if all(d in by_date.index for d in window):
         expected = sum(by_date[d] for d in window) / 7
         assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+
+
+def test_cnt_std_7_value_is_correct(feats):
+    """Hand-compute the std of the previous seven calendar days and compare."""
+    raw = pd.read_csv("data/raw/bike_daily.csv", parse_dates=["dteday"])
+    target_date = pd.Timestamp("2011-08-01")
+    # Get the previous seven calendar days
+    window = [target_date - pd.Timedelta(days=k) for k in range(1, 8)]
+
+    # Assert all seven dates exist in raw data
+    missing = [d for d in window if d not in raw["dteday"].values]
+    assert not missing, f"Missing dates: {missing}"
+
+    # Get cnt values for those dates
+    expected_std = np.std(raw.loc[raw.dteday.isin(window), TARGET], ddof=1)
+
+    actual_std = feats.set_index("dteday").cnt_std_7[target_date]
+
+    assert actual_std == pytest.approx(expected_std, rel=1e-5)
 
 
 def test_no_missing_values(feats):
