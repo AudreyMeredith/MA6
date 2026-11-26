@@ -73,3 +73,102 @@ FAILED tests/test_leakage.py::test_cnt_std_7_value_is_correct - AttributeErro...
 ============================== 1 failed in 0.30s ===============================
 
 ```
+
+## Exercise 2: Fault 1 - Forbidden column
+
+**Date:** 2026-11-25  
+**Command:** `/seed-fault Temporarily modify feature_columns in src/features.py to include casual, a forbidden target-leakage column. Capture the real hook stderr and failing pytest output before repairing the fault. Restore the original implementation and confirm all 16 tests pass. Document the results in docs/SEEDED_FAULTS.md. Do not commit.`
+
+---
+
+## Fault Introduced
+
+**File:** `src/features.py:82-85`  
+**Change:** Modified `feature_columns()` to explicitly include `"casual"` despite it being in `FORBIDDEN`:
+
+```python
+def feature_columns(df: pd.DataFrame) -> list[str]:
+    """Numeric columns that are safe to feed the model."""
+    numeric = df.select_dtypes(include="number").columns
+    return [c for c in numeric if c not in FORBIDDEN] + ["casual"]  # FAULT ADDED
+```
+
+---
+
+## Hook Detection
+
+**Hook:** `check_leakage.sh` (PostToolUse hook)  
+**Result:** ✅ **FAULT DETECTED** - The PostToolUse hook caught the fault before it could be committed.
+
+### Hook stderr:
+```
+[.../.claude/hooks/check_leakage.sh]: Leakage tests failed after editing /Users/audrey/Downloads/bikeshare-open/src/features.py:
+feats =         dteday  instant  season      yr  ... cnt_lag_1 cnt_lag_7   cnt_roll_7    cnt_std_7
+0   2011-01-10     10.0  WI...316
+713 2012-12-31    731.0  WINTER  2012.0  ...    1796.0     920.0  1531.428571   887.135250
+
+[714 rows x 29 columns]
+
+def test_no_forbidden_features(feats):
+    """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
+    construction, so this cannot discover a *new* leaky column. What it
+    catches is someone editing feature_columns() or FORBIDDEN -- which is
+    exactly the fault the Step 7 hook demonstrates."""
+    cols = set(feature_columns(feats))
+>   assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+E   AssertionError: forbidden columns in feature set: {'casual'}
+E   assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_7', 'cnt_std_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'instant', 'registered', ...})
+
+tests/test_leakage.py:32: AssertionError
+```
+
+---
+
+## Test Analysis
+
+**Test that detected the fault:** `test_no_forbidden_features` (Line 26-32 in tests/test_leakage.py)
+
+**Why it detected it:** This test computes the intersection of feature columns with FORBIDDEN and asserts it's empty. Since `"casual"` is both:
+1. A numeric column (passes `select_dtypes(include="number")`)
+2. In the FORBIDDEN set (`{"casual", "registered", "cnt", ...}`)
+
+The test correctly identified the violation.
+
+**Why this matters:** As documented in `src/config.py`:
+> casual + registered == cnt exactly, on every row. A model handed these scores R^2 ~ 1.0 and has learned addition. At prediction time you would not know either input: they are components of the thing being predicted.
+
+---
+
+## Repair Applied
+
+**File:** `src/features.py:85`  
+**Change:** Reverted to original implementation (removed `+ ["casual"]`):
+
+```python
+def feature_columns(df: pd.DataFrame) -> list[str]:
+    """Numeric columns that are safe to feed the model."""
+    numeric = df.select_dtypes(include="number").columns
+    return [c for c in numeric if c not in FORBIDDEN]  # REPAIRED
+```
+
+---
+
+## Verification After Repair
+
+**Command:** `make test`  
+**Result:** ✅ **All 16 tests passed**
+
+```
+python -m pytest tests/ -q
+................                                                         [100%]
+16 passed in 1.60s
+```
+
+---
+
+## Conclusion
+
+The `check_leakage.sh` PostToolUse hook successfully demonstrated its value as a defensive layer: it detected target leakage after the edit was applied and returned the test failure to the agent. The test suite (`test_no_forbidden_features`) caught the exact violation pattern when executed.
+
+**Status:** Fault detected → Hook reported failure → Repair applied → All tests pass
+**Repair:** One corrective Edit tool call. The fault was repaired within the same agent task without an additional user repair prompt.
