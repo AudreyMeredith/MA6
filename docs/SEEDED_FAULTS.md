@@ -324,3 +324,38 @@ python -m pytest tests/ -q
 17 passed in 1.47s
 
 ```
+
+## Exercise 2: Fault 4 - Bash file operations
+
+Claude Code initially denied the attempted Bash write
+into data/raw/. Therefore, the agent's attempted write
+did not succeed.
+
+A separate researcher-controlled terminal experiment
+demonstrated that a normal shell cp operation can write
+into data/raw/ without invoking the PostToolUse hook.
+
+The hook matches Edit and Write tools, not Bash commands
+or external terminal operations.
+
+Filesystem write protection would prevent unauthorized
+changes to raw data. A SHA-256 integrity check in make
+data would detect modifications to the original CSV.
+A PreToolUse hook for Bash could provide additional
+protection against agent-initiated writes.
+
+The demonstration file was removed, and the original
+dataset was not modified.
+
+### Terminal experiment output
+
+```text
+Dataset hash before demonstration:
+a6bed1577f6e4de56dcfae6d8315985073cc0ad3446c8c99ed60c86a0b5ad9dc  data/raw/bike_daily.csv
+Copied demonstration file:
+-rw-r--r--  1 audrey  staff  28 Nov 25 18:12 data/raw/fault4_demo.txt
+Harmless demonstration file
+Dataset hash after demonstration:
+a6bed1577f6e4de56dcfae6d8315985073cc0ad3446c8c99ed60c86a0b5ad9dc  data/raw/bike_daily.csv
+
+```
