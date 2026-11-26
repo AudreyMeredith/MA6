@@ -14,8 +14,17 @@ nothing worth reporting. The booster is there because it fails, and the
 reason it fails is the headline result.
 
 Run: python -m src.train
+
+Exercise 4 (off by default): TARGET_TRANSFORM=ratio fits ridge and hgb on
+cnt / cnt_roll_7 -- today relative to the trailing week -- and multiplies
+predictions back by cnt_roll_7 before scoring against cnt. cnt_roll_7 uses
+only d-1..d-7, so the transform is known at prediction time. A ratio stays
+in the range seen in 2011 even as 2012 demand grows, which is what a tree
+needs. Results go to reports/metrics_ex4.json and only validation scores
+are printed; reports/metrics.json is always the untransformed pipeline.
 """
 import json
+import os
 
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -28,6 +37,12 @@ from sklearn.preprocessing import StandardScaler
 
 from src.config import METRICS, PROCESSED, TARGET, TRAIN_END, VALID_END
 from src.features import feature_columns
+
+TARGET_TRANSFORM = os.environ.get("TARGET_TRANSFORM", "none")
+if TARGET_TRANSFORM not in {"none", "ratio"}:
+    raise ValueError(f"unknown TARGET_TRANSFORM: {TARGET_TRANSFORM!r}")
+RATIO_SCALE = "cnt_roll_7"            # the denominator; past-only by construction
+RATIO_MODELS = {"ridge", "hgb"}       # baselines are never transformed
 
 
 class PersistenceBaseline(BaseEstimator, RegressorMixin):
@@ -74,12 +89,21 @@ def fit_and_score() -> dict:
         "n_valid": len(valid),
         "n_test": len(test),
     }
+    if TARGET_TRANSFORM != "none":
+        results["target_transform"] = TARGET_TRANSFORM
     for name, model in MODELS.items():
-        model.fit(train[cols], train[TARGET])
+        ratio = TARGET_TRANSFORM == "ratio" and name in RATIO_MODELS
+        y_fit = train[TARGET] / train[RATIO_SCALE] if ratio else train[TARGET]
+        model.fit(train[cols], y_fit)
+
+        def predict(part, model=model, ratio=ratio):
+            pred = model.predict(part[cols])
+            return pred * part[RATIO_SCALE].to_numpy() if ratio else pred
+
         results[name] = {
             split: {
-                "r2": round(float(r2_score(part[TARGET], model.predict(part[cols]))), 4),
-                "mae": round(float(mean_absolute_error(part[TARGET], model.predict(part[cols]))), 1),
+                "r2": round(float(r2_score(part[TARGET], predict(part))), 4),
+                "mae": round(float(mean_absolute_error(part[TARGET], predict(part))), 1),
             }
             for split, part in [("valid", valid), ("test", test)]
         }
@@ -88,6 +112,13 @@ def fit_and_score() -> dict:
 
 if __name__ == "__main__":
     res = fit_and_score()
-    METRICS.parent.mkdir(parents=True, exist_ok=True)
-    METRICS.write_text(json.dumps(res, indent=2))
-    print(json.dumps({k: v for k, v in res.items() if k != "features"}, indent=2))
+    out = METRICS if TARGET_TRANSFORM == "none" else METRICS.with_name("metrics_ex4.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, indent=2))
+    if TARGET_TRANSFORM == "none":
+        print(json.dumps({k: v for k, v in res.items() if k != "features"}, indent=2))
+    else:
+        # Exercise 4 is decided on validation only; the test set is opened once, later.
+        print(f"TARGET_TRANSFORM={TARGET_TRANSFORM} -> {out.name} (validation only)")
+        for name in MODELS:
+            print(f"  {name:22s} valid R2 {res[name]['valid']['r2']:+.4f}  MAE {res[name]['valid']['mae']:.1f}")
