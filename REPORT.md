@@ -27,8 +27,22 @@ The decision was made on validation (H1 2012) only:
 
 ## Exercise 5: ridge vs persistence
 
-_To fill in._
+**Ridge is not worth deploying over "yesterday again."** On the held-out H2 2012 test set, ridge's mean absolute error is 840.3 rides a day and persistence's is 840.1: a forecaster using either one is off by the same amount on a typical day, and persistence gets there with no parameters, no training and nothing to retrain. Ridge does score higher on R^2 (0.636 vs 0.510), but R^2 squares the errors, so the gap comes from ridge avoiding a few large misses (days after a sharp weather change, when yesterday is a bad guide), not from being closer on ordinary days. Its advantage also shrank between validation and test: on H1 2012 ridge led by 0.27 R^2 and 200 rides of MAE, and six months later the MAE lead was gone. That is the pattern you would expect from a model whose lagged-demand coefficients were fit on 2011 levels and are drifting as demand grows. The case for ridge is that big misses can be the expensive ones (empty or overflowing docks), and if an operator could show that, the R^2 gap would matter. Without that evidence, a model that only matches a zero-parameter rule on the metric that measures everyday error has not earned its complexity, so we would deploy persistence as the default and keep ridge as a candidate to re-test as more 2012 data arrives.
 
 ## Attribution
 
-_To fill in: model and size used by each teammate (Audrey: local model; Antony: Claude Opus 5.5 in chat for Exercise 4, because the hosted fallback qwen3.5:27b-cloud was retired and the replacement required payment, and his laptop has 8 GB RAM). Then two lists: what the agent generated, and the decisions that were ours._
+**Models used:** Audrey used **`qwen3.5:9b` via Ollama with a 64k context window**, running locally through Claude Code under the custom model name `bikeshare-coder`; she did not switch models. Antony used **Claude Opus 5.5** (Anthropic, in the claude.ai chat, with access to his copy of the repo), not the course's local agent. His laptop has 8 GB of RAM, too little for the local model; the hosted fallback `qwen3.5:27b-cloud` was no longer available, and Ollama's suggested replacement (`glm-5.3-flash:cloud`) required payment. Work from different models is labelled below and should not be compared as if it came from one setup.
+
+**What the agents generated (code and text):**
+- `cnt_std_7` in `src/features.py` and its hand-computed test in `tests/test_leakage.py` (Audrey's agent, via `/new-feature`)
+- the raw-column classification test in `tests/test_contract.py`, the unknown-weather-label test, the seed-fault skill and its `SKILL.md`, the `CLAUDE.md` updates, and the seeded faults with their fixes (Audrey's agent)
+- the `TARGET_TRANSFORM=ratio` option in `src/train.py`, and first drafts of the Exercise 4 and Exercise 5 sections and their `DECISIONS.md` lines (Claude Opus 5.5)
+
+**Decisions that were ours** (each has a line in `docs/DECISIONS.md`):
+- **What to predict:** total daily rides (`cnt`) for day d, using only information available before d.
+- **What counts as leakage:** `casual` and `registered` (they sum to `cnt`), time indexes (`instant`, `yr`, `days_since_2011`), and the unverified `cnt_2d_bfr`; every lag is shifted before it is aggregated.
+- **How to split:** by date (train 2011, validate H1 2012, test H2 2012); all feature and transform choices were made on validation, and the test set was opened once per decision, afterwards.
+- **Which baselines:** the 2011 mean, and persistence ("yesterday again"), reported next to every model.
+- **Whether to keep the feature:** kept `cnt_std_7` (ridge validation R^2 +0.075, above the 0.01 noise floor).
+- **Whether the transform is defensible:** the ratio target is fair (past-only, matches multiplicative growth) but limited (chosen after seeing hgb fail, hurts ridge); the committed pipeline stays untransformed.
+- **Whether the answer is believable:** ridge does not beat persistence on test MAE, so we recommend persistence and treat ridge's R^2 edge as unproven.
