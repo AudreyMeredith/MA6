@@ -253,3 +253,74 @@ python -m pytest tests/ -q
 16 passed in 1.35s
 
 ```
+
+## Exercise 2: Fault 3 - Weather encoder
+
+Removed the if unknown: raise ValueError block from encode_weather.
+
+Initially, all 16 tests passed despite the fault.
+Added test_unknown_weather_label_raises to address this
+missing verification coverage.
+
+After adding the test, the hook returned exit code 2.
+Claude restored the original guard using one corrective
+Edit call after one additional user repair prompt.
+
+
+### Failing test output
+
+```text
+........F                                                                [100%]
+=================================== FAILURES ===================================
+______________________ test_unknown_weather_label_raises _______________________
+
+    def test_unknown_weather_label_raises():
+        """Unexpected weather labels must raise rather than silently become NaN."""
+        from src.features import encode_weather
+    
+        weather = pd.Series(["GOOD", "UNKNOWN", "BAD"])
+    
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_leakage.py:95: Failed
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_unknown_weather_label_raises - Failed: DID...
+1 failed, 8 passed in 0.26s
+
+```
+
+### Hook stderr (direct invocation)
+
+```text
+Leakage tests failed after editing src/features.py:
+........F                                                                [100%]
+=================================== FAILURES ===================================
+______________________ test_unknown_weather_label_raises _______________________
+
+    def test_unknown_weather_label_raises():
+        """Unexpected weather labels must raise rather than silently become NaN."""
+        from src.features import encode_weather
+    
+        weather = pd.Series(["GOOD", "UNKNOWN", "BAD"])
+    
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_leakage.py:95: Failed
+=========================== short test summary info ============================
+FAILED tests/test_leakage.py::test_unknown_weather_label_raises - Failed: DID...
+1 failed, 8 passed in 0.25s
+
+```
+
+### Verification after repair
+
+```text
+python -m pytest tests/ -q
+.................                                                        [100%]
+17 passed in 1.47s
+
+```

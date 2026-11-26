@@ -84,3 +84,13 @@ def test_no_missing_values(feats):
 def test_dates_are_sorted_and_unique(feats):
     assert feats.dteday.is_monotonic_increasing
     assert feats.dteday.is_unique
+
+
+def test_unknown_weather_label_raises():
+    """Unexpected weather labels must raise rather than silently become NaN."""
+    from src.features import encode_weather
+
+    weather = pd.Series(["GOOD", "UNKNOWN", "BAD"])
+
+    with pytest.raises(ValueError, match="unmapped weather labels"):
+        encode_weather(weather)
